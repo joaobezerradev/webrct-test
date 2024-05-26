@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 import SimplePeer from "simple-peer";
 
-const socket = io("http://localhost:8080", {
+const socket = io("https://srv421773.hstgr.cloud/ws", {
   transports: ["websocket"],
   upgrade: false,
 });
@@ -22,7 +22,7 @@ const App: React.FC = () => {
   const audioChunksRef = useRef<BlobPart[]>([]);
 
   useEffect(() => {
-    fetch("http://localhost:8080/rooms")
+    fetch("https://srv421773.hstgr.cloud/api/rooms")
       .then((response) => response.json())
       .then((data) => setRooms(data))
       .catch((error) => console.error("Error fetching rooms:", error));
