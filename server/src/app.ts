@@ -32,11 +32,11 @@ const io = new SocketIOServer(server);
 
 const rooms: { [key: string]: Room } = {};
 
-app.get("/", (req: Request, res: Response) => {
+app.get("/api", (req: Request, res: Response) => {
   res.send("Server is running.");
 });
 
-app.get("/rooms", (req: Request, res: Response) => {
+app.get("/api/rooms", (req: Request, res: Response) => {
   const roomList = Object.keys(rooms).map((roomId) => ({
     id: roomId,
     users: Array.from(rooms[roomId].users),
