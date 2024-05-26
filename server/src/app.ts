@@ -1,6 +1,8 @@
 import express, { Request, Response } from 'express';
 import http from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
+import path from 'node:path'
+import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 
 interface Room {
@@ -34,6 +36,16 @@ const rooms: { [key: string]: Room } = {};
 
 app.get("/api", (req: Request, res: Response) => {
   res.send("Server is running.");
+});
+
+app.get('/api/whisper', async (req, res) => {
+  const filePath = path.join(__dirname, 'whisper.wav');
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      console.error('Error sending file:', err);
+      res.status(500).send('Error sending file');
+    }
+  });
 });
 
 app.get("/api/rooms", (req: Request, res: Response) => {
@@ -77,7 +89,7 @@ io.on('connection', (socket: Socket) => {
     io.to(callerId).emit('receive-signal', { signal, from: socket.id });
   });
 
-  socket.on("whisper", ({ currentRoom, audioData, whisperRoomId }) => {
+  socket.on("whisper", ({ currentRoom, audioData, whisperRoomId }: any) => {
     if (whisperRoomId && rooms[whisperRoomId]) {
       io.to(whisperRoomId).emit("audioStream", { audioData, from: socket.id });
     } else {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 import SimplePeer from "simple-peer";
 
-const socket = io("https://srv421773.hstgr.cloud/", {
+const socket = io("http://localhost:8080/", {
   transports: ["websocket"],
   upgrade: false,
 });
@@ -22,7 +22,7 @@ const App: React.FC = () => {
   const audioChunksRef = useRef<BlobPart[]>([]);
 
   useEffect(() => {
-    fetch("https://srv421773.hstgr.cloud/api/rooms")
+    fetch("http://localhost:8080/api/rooms")
       .then((response) => response.json())
       .then((data) => setRooms(data))
       .catch((error) => console.error("Error fetching rooms:", error));
@@ -234,22 +234,40 @@ const App: React.FC = () => {
   };
 
   const playAudio = async (arrayBuffer: ArrayBuffer) => {
-    const audioContext = new (window.AudioContext ||
-      (window as any).webkitAudioContext)();
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-    const source = audioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioContext.destination);
-    source.start();
+    try {
+      const response = await fetch("http://localhost:8080/api/whisper");
+      const whisperArrayBuffer = await response.arrayBuffer();
+
+      const audioContext = new (window.AudioContext ||
+        (window as any).webkitAudioContext)();
+      const [whisperAudioBuffer, mainAudioBuffer] = await Promise.all([
+        audioContext.decodeAudioData(whisperArrayBuffer),
+        audioContext.decodeAudioData(arrayBuffer),
+      ]);
+
+      const whisperSource = audioContext.createBufferSource();
+      whisperSource.buffer = whisperAudioBuffer;
+      whisperSource.connect(audioContext.destination);
+
+      const mainSource = audioContext.createBufferSource();
+      mainSource.buffer = mainAudioBuffer;
+      mainSource.connect(audioContext.destination);
+
+      whisperSource.start();
+      const whisperDuration = whisperAudioBuffer.duration;
+      mainSource.start(audioContext.currentTime + whisperDuration);
+    } catch (error) {
+      console.error("Error playing audio.", error);
+    }
   };
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center py-10">
-      <h1 className="text-4xl font-extrabold mb-10">TS3 Clone</h1>
+    <div className="min-h-screen bg-gradient-to-r from-blue-100 to-blue-200 flex flex-col items-center justify-center py-10">
+      <h1 className="text-5xl font-extrabold mb-12 text-blue-900">TS3 Clone</h1>
       {!joinedRoom ? (
-        <div className="space-y-6">
+        <div className="space-y-8 w-full max-w-md">
           <button
             onClick={createRoom}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 transition"
+            className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg shadow-lg hover:bg-blue-700 transition-transform transform hover:scale-105"
           >
             Create Room
           </button>
@@ -258,11 +276,11 @@ const App: React.FC = () => {
             placeholder="Room ID"
             value={roomId}
             onChange={(e) => setRoomId(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:border-blue-500"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:border-blue-500"
           />
           <button
             onClick={() => joinRoom(roomId)}
-            className="px-6 py-3 bg-green-600 text-white rounded-lg shadow-md hover:bg-green-700 transition"
+            className="w-full px-6 py-3 bg-green-600 text-white rounded-lg shadow-lg hover:bg-green-700 transition-transform transform hover:scale-105"
           >
             Join Room
           </button>
@@ -275,8 +293,10 @@ const App: React.FC = () => {
             />
             <span className="text-gray-700">Join as Admin</span>
           </label>
-          <div className="p-4 border border-gray-300 rounded-lg shadow-sm max-h-96 overflow-y-auto">
-            <h2 className="text-xl font-bold mb-4">Available Rooms</h2>
+          <div className="p-6 border border-gray-300 rounded-lg shadow-sm max-h-96 overflow-y-auto bg-white">
+            <h2 className="text-2xl font-bold mb-4 text-gray-800">
+              Available Rooms
+            </h2>
             {rooms.length > 0 ? (
               rooms.map((room) => (
                 <div key={room.id} className="mb-4">
@@ -297,32 +317,41 @@ const App: React.FC = () => {
                 </div>
               ))
             ) : (
-              <div>No rooms available.</div>
+              <div className="text-gray-600">No rooms available.</div>
             )}
           </div>
         </div>
       ) : (
-        <div className="space-y-6">
-          <div id="remote-videos" className="flex flex-wrap justify-center" />
+        <div className="space-y-8 w-full max-w-md">
+          <div
+            id="remote-videos"
+            className="flex flex-wrap justify-center bg-white p-4 rounded-lg shadow-md"
+          />
           <div className="text-lg font-bold text-gray-800">
             Current Room: {roomId}
           </div>
-          <input
-            type="text"
-            placeholder="Whisper Room ID (Optional)"
-            value={whisperRoomId}
-            onChange={(e) => setWhisperRoomId(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:border-blue-500"
-          />
-          <button
-            onMouseDown={handleWhisperStart}
-            onMouseUp={handleWhisperStop}
-            className="px-6 py-3 bg-yellow-600 text-white rounded-lg shadow-md hover:bg-yellow-700 transition"
-          >
-            Whisper
-          </button>
-          <div className="p-4 border border-gray-300 rounded-lg shadow-sm max-h-96 overflow-y-auto">
-            <h2 className="text-xl font-bold mb-4">Available Rooms</h2>
+          {isAdmin && (
+            <>
+              <input
+                type="text"
+                placeholder="Whisper Room ID (Optional)"
+                value={whisperRoomId}
+                onChange={(e) => setWhisperRoomId(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:border-blue-500"
+              />
+              <button
+                onMouseDown={handleWhisperStart}
+                onMouseUp={handleWhisperStop}
+                className="w-full px-6 py-3 bg-yellow-600 text-white rounded-lg shadow-lg hover:bg-yellow-700 transition-transform transform hover:scale-105"
+              >
+                Whisper
+              </button>
+            </>
+          )}
+          <div className="p-6 border border-gray-300 rounded-lg shadow-sm max-h-96 overflow-y-auto bg-white">
+            <h2 className="text-2xl font-bold mb-4 text-gray-800">
+              Available Rooms
+            </h2>
             {rooms.length > 0 ? (
               rooms.map((room) => (
                 <div key={room.id} className="mb-4">
@@ -343,7 +372,7 @@ const App: React.FC = () => {
                 </div>
               ))
             ) : (
-              <div>No rooms available.</div>
+              <div className="text-gray-600">No rooms available.</div>
             )}
           </div>
         </div>
