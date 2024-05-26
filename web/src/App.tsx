@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 import SimplePeer from "simple-peer";
 
-const socket = io("https://srv421773.hstgr.cloud/ws", {
+const socket = io("https://srv421773.hstgr.cloud/", {
   transports: ["websocket"],
   upgrade: false,
 });
