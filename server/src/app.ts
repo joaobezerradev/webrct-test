@@ -2,7 +2,6 @@ import express, { Request, Response } from 'express';
 import http from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import path from 'node:path'
-import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 
 interface Room {

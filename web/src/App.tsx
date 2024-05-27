@@ -35,7 +35,7 @@ const App: React.FC = () => {
       setJoinedRoom(true);
       setRoomId(roomId); // Atualiza o estado com o ID da sala
       navigator.mediaDevices
-        .getUserMedia({ audio: true, video: true })
+        .getUserMedia({ audio: true, video: false })
         .then((stream) => {
           localStreamRef.current = stream;
           handleRemoteStream(stream, socket.id!, true);
@@ -46,9 +46,9 @@ const App: React.FC = () => {
       setUsers(users);
     });
 
-    socket.on("user-joined", ({ socketId, isAdmin: userIsAdmin }) => {
+    socket.on("user-joined", ({ socketId }) => {
       if (socketId !== socket.id) {
-        createPeer(socketId, localStreamRef.current!, isAdmin);
+        createPeer(socketId, localStreamRef.current!);
       }
     });
 
@@ -57,7 +57,7 @@ const App: React.FC = () => {
       if (peer) {
         peer.signal(signal);
       } else {
-        addPeer(signal, from, localStreamRef.current!, isAdmin);
+        addPeer(signal, from, localStreamRef.current!);
       }
     });
 
@@ -65,7 +65,7 @@ const App: React.FC = () => {
       handleUserDisconnected(socketId);
     });
 
-    socket.on("audioStream", ({ audioData, from }) => {
+    socket.on("audioStream", ({ audioData }) => {
       playAudio(audioData);
     });
 
@@ -98,11 +98,7 @@ const App: React.FC = () => {
     socket.emit("join-room", { roomId: selectedRoomId ?? roomId, isAdmin });
   };
 
-  const createPeer = (
-    userToSignal: string,
-    stream: MediaStream,
-    isAdmin: boolean
-  ) => {
+  const createPeer = (userToSignal: string, stream: MediaStream) => {
     const peer = new SimplePeer({
       initiator: true,
       trickle: false,
@@ -123,8 +119,7 @@ const App: React.FC = () => {
   const addPeer = (
     incomingSignal: string,
     callerId: string,
-    stream: MediaStream,
-    isAdmin: boolean
+    stream: MediaStream
   ) => {
     const peer = new SimplePeer({
       initiator: false,
@@ -151,31 +146,70 @@ const App: React.FC = () => {
   ) => {
     remoteStreamRefs.current[userId] = stream;
 
-    const videoContainer = document.createElement("div");
-    videoContainer.className = "video-container";
-    videoContainer.style.display = "inline-block";
-    videoContainer.style.margin = "10px";
+    const audioContainer = document.createElement("div");
+    audioContainer.className = "audio-container";
+    audioContainer.style.display = "inline-block";
+    audioContainer.style.margin = "10px";
+    audioContainer.style.padding = "20px";
+    audioContainer.style.borderRadius = "10px";
+    audioContainer.style.backgroundColor = isLocal
+      ? "rgba(0, 122, 255, 0.1)"
+      : "rgba(255, 255, 255, 0.1)"; // Azul para o usuário local
 
-    const videoElement = document.createElement("video");
-    videoElement.srcObject = stream;
-    videoElement.autoplay = true;
-    videoElement.playsInline = true;
-    videoElement.width = 400;
-    videoElement.height = 300;
+    audioContainer.style.boxShadow = "0 4px 6px rgba(0, 0, 0, 0.1)";
+    audioContainer.style.textAlign = "center";
+
+    const audioElement = document.createElement("audio");
+    audioElement.srcObject = stream;
+    audioElement.autoplay = true;
+    audioElement.style.visibility = "hidden";
+    audioElement.style.height = "0";
+    audioElement.style.width = "0";
     if (isLocal) {
-      videoElement.muted = true;
+      audioElement.muted = true; // Always mute local audio for the user
+    }
+
+    const muteIcon = document.createElement("div");
+    muteIcon.className = "mute-icon";
+    muteIcon.style.fontSize = "24px";
+    muteIcon.style.marginTop = "10px";
+    muteIcon.style.cursor = "pointer";
+    muteIcon.style.color = "white";
+    muteIcon.innerHTML = isLocal
+      ? '<i class="fa fa-microphone" aria-hidden="true"></i>'
+      : '<i class="fas fa-volume-up"></i>';
+
+    if (isLocal) {
+      muteIcon.onclick = () => {
+        stream.getTracks().forEach((track) => {
+          track.enabled = !track.enabled;
+        });
+        muteIcon.innerHTML = stream.getTracks().some((track) => !track.enabled)
+          ? '<i class="fa fa-microphone-slash" aria-hidden="true"></i>'
+          : '<i class="fa fa-microphone" aria-hidden="true"></i>';
+      };
+    } else {
+      muteIcon.onclick = () => {
+        audioElement.muted = !audioElement.muted;
+        muteIcon.innerHTML = audioElement.muted
+          ? '<i class="fas fa-volume-mute"></i>'
+          : '<i class="fas fa-volume-up"></i>';
+      };
     }
 
     const label = document.createElement("div");
-    label.textContent = isLocal ? "You" : userId;
-    label.className = "video-label";
-    label.style.textAlign = "center";
+    label.textContent = isLocal ? `${userId} (You)` : userId;
+    label.className = "audio-label";
+    label.style.marginTop = "10px";
+    label.style.color = "white";
+    label.style.fontWeight = "bold";
 
-    videoContainer.appendChild(videoElement);
-    videoContainer.appendChild(label);
+    audioContainer.appendChild(audioElement);
+    audioContainer.appendChild(muteIcon);
+    audioContainer.appendChild(label);
 
-    remoteVideoRefs.current[userId] = videoContainer;
-    document.getElementById("remote-videos")?.appendChild(videoContainer);
+    remoteVideoRefs.current[userId] = audioContainer;
+    document.getElementById("remote-videos")?.appendChild(audioContainer);
   };
 
   const handleUserDisconnected = (socketId: string) => {
@@ -260,111 +294,107 @@ const App: React.FC = () => {
       console.error("Error playing audio.", error);
     }
   };
+
   return (
-    <div className="min-h-screen bg-gradient-to-r from-blue-100 to-blue-200 flex flex-col items-center justify-center py-10">
-      <h1 className="text-5xl font-extrabold mb-12 text-blue-900">TS3 Clone</h1>
-      {!joinedRoom ? (
-        <div className="space-y-8 w-full max-w-md">
-          <button
-            onClick={createRoom}
-            className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg shadow-lg hover:bg-blue-700 transition-transform transform hover:scale-105"
-          >
-            Create Room
-          </button>
-          <input
-            type="text"
-            placeholder="Room ID"
-            value={roomId}
-            onChange={(e) => setRoomId(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:border-blue-500"
-          />
-          <button
-            onClick={() => joinRoom(roomId)}
-            className="w-full px-6 py-3 bg-green-600 text-white rounded-lg shadow-lg hover:bg-green-700 transition-transform transform hover:scale-105"
-          >
-            Join Room
-          </button>
-          <label className="flex items-center space-x-3">
-            <input
-              type="checkbox"
-              checked={isAdmin}
-              onChange={(e) => setIsAdmin(e.target.checked)}
-              className="form-checkbox h-5 w-5 text-blue-600"
+    <div className="min-h-screen bg-gradient-to-r from-gray-900 to-gray-800 py-10 text-gray-100 grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <header className="col-span-1 lg:col-span-3 mb-6 text-center">
+        <h1 className="text-5xl font-extrabold text-indigo-400">TS3 Clone</h1>
+      </header>
+
+      {joinedRoom ? (
+        <div className="col-span-2 flex flex-col h-full space-y-6">
+          <div className="flex-grow bg-gray-800 p-4 rounded-lg shadow-md overflow-y-auto">
+            <div
+              id="remote-videos"
+              className="flex flex-col space-y-4 max-w-md w-full"
             />
-            <span className="text-gray-700">Join as Admin</span>
-          </label>
-          <div className="p-6 border border-gray-300 rounded-lg shadow-sm max-h-96 overflow-y-auto bg-white">
-            <h2 className="text-2xl font-bold mb-4 text-gray-800">
-              Available Rooms
-            </h2>
-            {rooms.length > 0 ? (
-              rooms.map((room) => (
-                <div key={room.id} className="mb-4">
-                  <div className="font-semibold text-gray-800">{room.id}</div>
-                  <button
-                    onClick={() => joinRoom(room.id)}
-                    className="text-blue-500 hover:underline"
-                  >
-                    Join Room
-                  </button>
-                  <ul className="pl-4">
-                    {room.users.map((user) => (
-                      <li key={user} className="text-gray-600">
-                        {user}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))
-            ) : (
-              <div className="text-gray-600">No rooms available.</div>
-            )}
           </div>
         </div>
       ) : (
-        <div className="space-y-8 w-full max-w-md">
-          <div
-            id="remote-videos"
-            className="flex flex-wrap justify-center bg-white p-4 rounded-lg shadow-md"
-          />
-          <div className="text-lg font-bold text-gray-800">
-            Current Room: {roomId}
-          </div>
-          {isAdmin && (
-            <>
+        <div className="col-span-1 lg:col-span-3 flex justify-center items-center">
+          <div className="space-y-8 w-full max-w-md flex flex-col items-center">
+            <button
+              onClick={createRoom}
+              className="w-full px-6 py-3 bg-indigo-600 text-white rounded-lg shadow-lg hover:bg-indigo-700 transition-transform transform hover:scale-105"
+            >
+              Create Room
+            </button>
+            <input
+              type="text"
+              placeholder="Room ID"
+              value={roomId}
+              onChange={(e) => setRoomId(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-600 rounded-lg shadow-sm focus:outline-none focus:border-indigo-500 bg-gray-700 text-gray-100"
+            />
+            <button
+              onClick={() => joinRoom(roomId)}
+              className="w-full px-6 py-3 bg-green-600 text-white rounded-lg shadow-lg hover:bg-green-700 transition-transform transform hover:scale-105"
+            >
+              Join Room
+            </button>
+            <label className="flex items-center space-x-3">
               <input
-                type="text"
-                placeholder="Whisper Room ID (Optional)"
-                value={whisperRoomId}
-                onChange={(e) => setWhisperRoomId(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:border-blue-500"
+                type="checkbox"
+                checked={isAdmin}
+                onChange={(e) => setIsAdmin(e.target.checked)}
+                className="form-checkbox h-5 w-5 text-indigo-600"
               />
-              <button
-                onMouseDown={handleWhisperStart}
-                onMouseUp={handleWhisperStop}
-                className="w-full px-6 py-3 bg-yellow-600 text-white rounded-lg shadow-lg hover:bg-yellow-700 transition-transform transform hover:scale-105"
-              >
-                Whisper
-              </button>
-            </>
-          )}
-          <div className="p-6 border border-gray-300 rounded-lg shadow-sm max-h-96 overflow-y-auto bg-white">
-            <h2 className="text-2xl font-bold mb-4 text-gray-800">
+              <span className="text-gray-300">Join as Admin</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      <div
+        className={`space-y-8 w-full max-w-md ${
+          joinedRoom ? "col-span-1" : "col-span-1 lg:col-span-3"
+        } flex flex-col h-full`}
+      >
+        {joinedRoom && (
+          <>
+            <div className="text-lg font-bold text-gray-100">
+              Current Room: {roomId}
+            </div>
+          </>
+        )}
+
+        {joinedRoom && isAdmin && (
+          <>
+            <input
+              type="text"
+              placeholder="Whisper Room ID (Optional)"
+              value={whisperRoomId}
+              onChange={(e) => setWhisperRoomId(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-600 rounded-lg shadow-sm focus:outline-none focus:border-indigo-500 bg-gray-700 text-gray-100"
+            />
+            <button
+              onMouseDown={handleWhisperStart}
+              onMouseUp={handleWhisperStop}
+              className="w-full px-6 py-3 bg-yellow-600 text-white rounded-lg shadow-lg hover:bg-yellow-700 transition-transform transform hover:scale-105"
+            >
+              Whisper
+            </button>
+          </>
+        )}
+
+        {joinedRoom && (
+          <div className="flex-grow bg-gray-800 p-6 border border-gray-600 rounded-lg shadow-sm overflow-y-auto">
+            <h2 className="text-2xl font-bold mb-4 text-gray-100">
               Available Rooms
             </h2>
             {rooms.length > 0 ? (
               rooms.map((room) => (
                 <div key={room.id} className="mb-4">
-                  <div className="font-semibold text-gray-800">{room.id}</div>
+                  <div className="font-semibold text-gray-200">{room.id}</div>
                   <button
                     onClick={() => joinRoom(room.id)}
-                    className="text-blue-500 hover:underline"
+                    className="text-indigo-400 hover:underline"
                   >
                     Join Room
                   </button>
                   <ul className="pl-4">
                     {room.users.map((user) => (
-                      <li key={user} className="text-gray-600">
+                      <li key={user} className="text-gray-400">
                         {user}
                       </li>
                     ))}
@@ -372,11 +402,11 @@ const App: React.FC = () => {
                 </div>
               ))
             ) : (
-              <div className="text-gray-600">No rooms available.</div>
+              <div className="text-gray-400">No rooms available.</div>
             )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };
