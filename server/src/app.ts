@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import http from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
-import path from 'node:path'
+import path from 'node:path';
 import cors from 'cors';
 
 interface Room {
@@ -32,6 +32,7 @@ const server = http.createServer(app);
 const io = new SocketIOServer(server);
 
 const rooms: { [key: string]: Room } = {};
+const userRoomCache: { [socketId: string]: string } = {};
 
 app.get("/api", (req: Request, res: Response) => {
   res.send("Server is running.");
@@ -72,6 +73,7 @@ io.on('connection', (socket: Socket) => {
       if (isAdmin) {
         room.admins.add(socket.id);
       }
+      userRoomCache[socket.id] = roomId;
       socket.join(roomId);
       socket.emit('joined-room', { roomId });
       io.to(roomId).emit('user-joined', { socketId: socket.id, isAdmin });
@@ -100,15 +102,55 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
+  socket.on('mute-user', ({ roomId, userId }) => {
+    const userRoomId = roomId || userRoomCache[socket.id];
+    if (userRoomId) {
+      const room = rooms[userRoomId];
+      if (room && room.admins.has(socket.id)) {
+        io.to(userRoomId).emit('mute-user', userId);
+      }
+    } else {
+      console.log(`User ${socket.id} not found in any room.`);
+    }
+  });
+
+  socket.on('unmute-user', ({ roomId, userId }) => {
+    const userRoomId = roomId || userRoomCache[socket.id];
+    if (userRoomId) {
+      const room = rooms[userRoomId];
+      if (room && room.admins.has(socket.id)) {
+        io.to(userRoomId).emit('unmute-user', userId);
+        io.to(userRoomId).emit('microphone-unmuted', userId);
+      }
+    }
+  });
+
+  socket.on('remove-user', ({ roomId, userId }) => {
+    const userRoomId = roomId || userRoomCache[socket.id];
+    if (userRoomId) {
+      const room = rooms[userRoomId];
+      if (room && room.admins.has(socket.id)) {
+        room.users.delete(userId);
+        delete userRoomCache[userId];
+        io.to(userRoomId).emit('user-disconnected', userId);
+        io.to(userRoomId).emit('update-users', Array.from(room.users));
+        io.sockets.sockets.get(userId)?.leave(userRoomId);
+        console.log(`User ${userId} removed from room ${userRoomId}`);
+      }
+    }
+  });
+
   socket.on('disconnect', () => {
-    for (const roomId in rooms) {
-      const room = rooms[roomId];
-      if (room.users.delete(socket.id)) {
+    const userRoomId = userRoomCache[socket.id];
+    if (userRoomId) {
+      const room = rooms[userRoomId];
+      if (room) {
+        room.users.delete(socket.id);
         room.admins.delete(socket.id);
-        io.to(roomId).emit('user-disconnected', socket.id);
-        io.to(roomId).emit('update-users', Array.from(room.users));
-        console.log(`User ${socket.id} disconnected from room ${roomId}`);
-        break;
+        io.to(userRoomId).emit('user-disconnected', socket.id);
+        io.to(userRoomId).emit('update-users', Array.from(room.users));
+        delete userRoomCache[socket.id];
+        console.log(`User ${socket.id} disconnected from room ${userRoomId}`);
       }
     }
   });
@@ -118,3 +160,5 @@ const port = process.env.PORT || 8080;
 server.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
+
+

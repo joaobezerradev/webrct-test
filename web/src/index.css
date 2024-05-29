@@ -1,3 +1,17 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+
+/* Tailwind CSS */
+.audio-container {
+  @apply inline-block m-2 p-4 rounded-lg bg-gray-800 shadow-md text-center;
+}
+
+.mute-button {
+  @apply bg-red-600 text-white px-2 py-1 rounded;
+}
+
+.remove-button {
+  @apply bg-red-600 text-white px-2 py-1 rounded ml-2;
+}

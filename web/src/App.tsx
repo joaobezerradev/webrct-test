@@ -11,7 +11,7 @@ const App: React.FC = () => {
   const [roomId, setRoomId] = useState<string>("");
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [joinedRoom, setJoinedRoom] = useState<boolean>(false);
-  const [users, setUsers] = useState<string[]>([]);
+  const [users, setUsers] = useState<{ id: string; muted: boolean }[]>([]);
   const [rooms, setRooms] = useState<{ id: string; users: string[] }[]>([]);
   const [whisperRoomId, setWhisperRoomId] = useState<string>("");
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -33,17 +33,17 @@ const App: React.FC = () => {
 
     socket.on("joined-room", ({ roomId }) => {
       setJoinedRoom(true);
-      setRoomId(roomId); // Atualiza o estado com o ID da sala
+      setRoomId(roomId);
       navigator.mediaDevices
         .getUserMedia({ audio: true, video: false })
         .then((stream) => {
           localStreamRef.current = stream;
-          handleRemoteStream(stream, socket.id!, true);
+          handleRemoteStream(stream, socket.id!, true, roomId);
         });
     });
 
     socket.on("update-users", (users: string[]) => {
-      setUsers(users);
+      setUsers(users.map((user) => ({ id: user, muted: false })));
     });
 
     socket.on("user-joined", ({ socketId }) => {
@@ -69,6 +69,35 @@ const App: React.FC = () => {
       playAudio(audioData);
     });
 
+    socket.on("mute-user", (userId) => {
+      setUsers((prevUsers) =>
+        prevUsers.map((user) =>
+          user.id === userId ? { ...user, muted: true } : user
+        )
+      );
+      if (userId === socket.id && localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
+      updateMuteIcon(userId, true);
+    });
+
+    socket.on("unmute-user", (userId) => {
+      console.log({ event: "unmute-user received", userId });
+      setUsers((prevUsers) =>
+        prevUsers.map((user) =>
+          user.id === userId ? { ...user, muted: false } : user
+        )
+      );
+      if (userId === socket.id && localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => {
+          track.enabled = true;
+        });
+      }
+      updateMuteIcon(userId, false);
+    });
+
     const handleBeforeUnload = () => {
       for (const socketId in peersRef.current) {
         handleUserDisconnected(socketId);
@@ -87,6 +116,8 @@ const App: React.FC = () => {
       socket.off("receive-signal");
       socket.off("user-disconnected");
       socket.off("audioStream");
+      socket.off("mute-user");
+      socket.off("unmute-user");
     };
   }, []);
 
@@ -95,7 +126,8 @@ const App: React.FC = () => {
   };
 
   const joinRoom = (selectedRoomId?: string) => {
-    socket.emit("join-room", { roomId: selectedRoomId ?? roomId, isAdmin });
+    const roomToJoin = selectedRoomId ?? roomId;
+    socket.emit("join-room", { roomId: roomToJoin, isAdmin });
   };
 
   const createPeer = (userToSignal: string, stream: MediaStream) => {
@@ -110,7 +142,7 @@ const App: React.FC = () => {
     });
 
     peer.on("stream", (stream) => {
-      handleRemoteStream(stream, userToSignal);
+      handleRemoteStream(stream, userToSignal, false, roomId);
     });
 
     peersRef.current[userToSignal] = peer;
@@ -132,7 +164,7 @@ const App: React.FC = () => {
     });
 
     peer.on("stream", (stream) => {
-      handleRemoteStream(stream, callerId);
+      handleRemoteStream(stream, callerId, false, roomId);
     });
 
     peer.signal(incomingSignal);
@@ -142,7 +174,8 @@ const App: React.FC = () => {
   const handleRemoteStream = (
     stream: MediaStream,
     userId: string,
-    isLocal: boolean = false
+    isLocal: boolean = false,
+    currentRoomId: string
   ) => {
     remoteStreamRefs.current[userId] = stream;
 
@@ -154,8 +187,7 @@ const App: React.FC = () => {
     audioContainer.style.borderRadius = "10px";
     audioContainer.style.backgroundColor = isLocal
       ? "rgba(0, 122, 255, 0.1)"
-      : "rgba(255, 255, 255, 0.1)"; // Azul para o usuário local
-
+      : "rgba(255, 255, 255, 0.1)";
     audioContainer.style.boxShadow = "0 4px 6px rgba(0, 0, 0, 0.1)";
     audioContainer.style.textAlign = "center";
 
@@ -166,7 +198,7 @@ const App: React.FC = () => {
     audioElement.style.height = "0";
     audioElement.style.width = "0";
     if (isLocal) {
-      audioElement.muted = true; // Always mute local audio for the user
+      audioElement.muted = true;
     }
 
     const muteIcon = document.createElement("div");
@@ -179,23 +211,20 @@ const App: React.FC = () => {
       ? '<i class="fa fa-microphone" aria-hidden="true"></i>'
       : '<i class="fas fa-volume-up"></i>';
 
-    if (isLocal) {
-      muteIcon.onclick = () => {
-        stream.getTracks().forEach((track) => {
-          track.enabled = !track.enabled;
-        });
-        muteIcon.innerHTML = stream.getTracks().some((track) => !track.enabled)
-          ? '<i class="fa fa-microphone-slash" aria-hidden="true"></i>'
-          : '<i class="fa fa-microphone" aria-hidden="true"></i>';
-      };
-    } else {
-      muteIcon.onclick = () => {
+    muteIcon.onclick = () => {
+      if (isLocal) {
+        const track = stream.getTracks()[0];
+        track.enabled = !track.enabled;
+        muteIcon.innerHTML = track.enabled
+          ? '<i class="fa fa-microphone" aria-hidden="true"></i>'
+          : '<i class="fa fa-microphone-slash" aria-hidden="true"></i>';
+      } else {
         audioElement.muted = !audioElement.muted;
         muteIcon.innerHTML = audioElement.muted
           ? '<i class="fas fa-volume-mute"></i>'
           : '<i class="fas fa-volume-up"></i>';
-      };
-    }
+      }
+    };
 
     const label = document.createElement("div");
     label.textContent = isLocal ? `${userId} (You)` : userId;
@@ -208,8 +237,59 @@ const App: React.FC = () => {
     audioContainer.appendChild(muteIcon);
     audioContainer.appendChild(label);
 
+    if (!isLocal) {
+      const muteButton = document.createElement("button");
+      muteButton.className =
+        "mute-button bg-red-600 text-white px-2 py-1 rounded";
+      muteButton.innerText = "Mute";
+      muteButton.onclick = () => {
+        const user = users.find((user) => user.id === userId);
+        if (user && user.muted) {
+          socket.emit("unmute-user", { roomId: currentRoomId, userId });
+          user.muted = false;
+        } else {
+          socket.emit("mute-user", { roomId: currentRoomId, userId });
+        }
+      };
+
+      const removeButton = document.createElement("button");
+      removeButton.className =
+        "remove-button bg-red-600 text-white px-2 py-1 rounded ml-2";
+      removeButton.innerText = "Remove";
+      removeButton.onclick = () => {
+        socket.emit("remove-user", { roomId: currentRoomId, userId });
+      };
+
+      audioContainer.appendChild(muteButton);
+      audioContainer.appendChild(removeButton);
+    }
+
     remoteVideoRefs.current[userId] = audioContainer;
     document.getElementById("remote-videos")?.appendChild(audioContainer);
+
+    // Listen for microphone unmuted event
+    socket.on("microphone-unmuted", (unmutedUserId) => {
+      console.log("microphone-unmuted");
+      updateMuteIcon(unmutedUserId, false);
+    });
+  };
+
+  const updateMuteIcon = (userId: string, muted: boolean) => {
+    const audioContainer = remoteVideoRefs.current[userId];
+    if (audioContainer) {
+      const muteIcon = audioContainer.querySelector(".mute-icon");
+      if (muteIcon) {
+        muteIcon.innerHTML = muted
+          ? '<i class="fa fa-microphone-slash" aria-hidden="true"></i>'
+          : '<i class="fa fa-microphone" aria-hidden="true"></i>';
+      }
+      const muteButton = audioContainer.querySelector(
+        ".mute-button"
+      ) as HTMLButtonElement;
+      if (muteButton) {
+        muteButton.innerText = muted ? "Unmute" : "Mute";
+      }
+    }
   };
 
   const handleUserDisconnected = (socketId: string) => {
@@ -227,7 +307,7 @@ const App: React.FC = () => {
     if (remoteStreamRefs.current[socketId]) {
       delete remoteStreamRefs.current[socketId];
     }
-    setUsers((prevUsers) => prevUsers.filter((user) => user !== socketId));
+    setUsers((prevUsers) => prevUsers.filter((user) => user.id !== socketId));
   };
 
   const handleWhisperStart = () => {
